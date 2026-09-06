@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+**/appsettings.json
+**/*.pem
+**/*.key
+**/data/
+**/exports/
+.vs/
+.idea/
