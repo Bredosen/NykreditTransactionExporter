@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace NykreditTransactionExporter.Storage;
 
 internal sealed class SessionState
@@ -14,6 +16,8 @@ internal sealed class SessionState
     public DateTimeOffset? ValidUntil { get; set; }
 
     public DateTimeOffset SavedAt { get; set; }
+
+    public JsonElement? AuthorizationData { get; set; }
 
     public List<AccountState> Accounts { get; set; } = [];
     #endregion

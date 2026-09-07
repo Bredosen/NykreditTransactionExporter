@@ -8,12 +8,18 @@ namespace NykreditTransactionExporter.Application.Watching;
 
 internal sealed class TransactionWatcher
 {
-    #region Fields
+    #region Members
+    #region Constants
+    private const int MaxRecentEvents = 100;
+    #endregion
+
+    #region Readonly Fields
     private readonly WatcherSettings _settings;
     private readonly EnableBankingClient _client;
     private readonly SessionStore _sessionStore;
     private readonly WatcherStateStore _stateStore;
     private readonly WebhookNotifier _webhookNotifier;
+    #endregion
     #endregion
 
     #region Create transaction watcher
@@ -38,7 +44,6 @@ internal sealed class TransactionWatcher
         bool runOnce,
         CancellationToken cancellationToken)
     {
-        ValidateConfiguration();
         using FileStream watcherLock = AcquireWatcherLock();
 
         SessionState session = await _sessionStore.LoadAsync(cancellationToken);
@@ -52,8 +57,10 @@ internal sealed class TransactionWatcher
         }
 
         TimeSpan interval = TimeSpan.FromMinutes(_settings.IntervalMinutes);
+        string webhookMode = _webhookNotifier.IsConfigured ? "webhook delivery enabled" : "local events only";
         Console.WriteLine(
-            $"Watching {accounts.Count} account(s) every {_settings.IntervalMinutes} minute(s). Press Ctrl+C to stop.");
+            $"Watching {accounts.Count} account(s) every {_settings.IntervalMinutes} minute(s), {webhookMode}. " +
+            "Press Ctrl+C to stop.");
 
         try
         {
@@ -123,35 +130,67 @@ internal sealed class TransactionWatcher
                 var baselineAccountSet = new HashSet<string>(baselineAccounts, StringComparer.OrdinalIgnoreCase);
                 foreach (var (key, transaction) in observations)
                 {
-                    if (baselineAccountSet.Contains(transaction.AccountUid))
+                    if (!baselineAccountSet.Contains(transaction.AccountUid))
                     {
-                        state.SeenTransactionKeys.Add(key);
+                        continue;
                     }
+
+                    state.SeenTransactionKeys.Add(key);
+                    state.WebhookHandledTransactionKeys.Add(key);
                 }
 
                 int baselineTransactions = observations.Count(item =>
                     baselineAccountSet.Contains(item.Transaction.AccountUid));
                 Console.WriteLine(
                     $"Watcher baseline created for {baselineAccounts.Length} account(s) with " +
-                    $"{baselineTransactions} existing booked transaction(s); no baseline webhooks were sent.");
+                    $"{baselineTransactions} existing booked transaction(s); no baseline events were emitted.");
             }
 
             await _stateStore.SaveAsync(state, cancellationToken);
         }
 
+        int detected = 0;
         int delivered = 0;
         int failures = 0;
         foreach (var (key, transaction) in observations)
         {
-            if (state.SeenTransactionKeys.Contains(key))
+            string eventId = TransactionIdentity.CreateEventId(key);
+            bool isNew = state.SeenTransactionKeys.Add(key);
+            TransactionBookedEvent? bookedEvent = null;
+            if (isNew)
+            {
+                bookedEvent = new TransactionBookedEvent(eventId, now, transaction);
+                state.RecentEvents.Add(bookedEvent);
+                TrimRecentEvents(state);
+                detected++;
+
+                if (!_webhookNotifier.IsConfigured)
+                {
+                    state.WebhookHandledTransactionKeys.Add(key);
+                }
+
+                await _stateStore.SaveAsync(state, cancellationToken);
+            }
+
+            if (!_webhookNotifier.IsConfigured)
+            {
+                state.WebhookHandledTransactionKeys.Add(key);
+                continue;
+            }
+
+            if (state.WebhookHandledTransactionKeys.Contains(key))
             {
                 continue;
             }
 
+            bookedEvent ??= state.RecentEvents.LastOrDefault(item =>
+                string.Equals(item.EventId, eventId, StringComparison.Ordinal));
+            bookedEvent ??= new TransactionBookedEvent(eventId, now, transaction);
+
             try
             {
-                await _webhookNotifier.SendBookedTransactionAsync(key, transaction, cancellationToken);
-                state.SeenTransactionKeys.Add(key);
+                await _webhookNotifier.SendBookedTransactionAsync(bookedEvent, cancellationToken);
+                state.WebhookHandledTransactionKeys.Add(key);
                 await _stateStore.SaveAsync(state, cancellationToken);
                 delivered++;
             }
@@ -171,12 +210,13 @@ internal sealed class TransactionWatcher
         await _stateStore.SaveAsync(state, cancellationToken);
         Console.WriteLine(
             $"Watcher poll {dateFrom:yyyy-MM-dd}..{today:yyyy-MM-dd}: " +
-            $"{observations.Count} booked, {delivered} new delivered, {failures} failed.");
+            $"{observations.Count} booked, {detected} new local event(s), " +
+            $"{delivered} webhook(s) delivered, {failures} webhook failure(s).");
 
         if (failOnDeliveryError && failures > 0)
         {
             throw new InvalidOperationException(
-                $"{failures} webhook delivery attempt(s) failed. Failed transactions remain unacknowledged and will be retried.");
+                $"{failures} webhook delivery attempt(s) failed. Local events were retained and failed webhook deliveries will be retried.");
         }
     }
     #endregion
@@ -207,6 +247,22 @@ internal sealed class TransactionWatcher
             .ThenBy(item => item.Transaction.AccountUid, StringComparer.Ordinal)
             .ThenBy(item => item.Key, StringComparer.Ordinal)
             .ToArray();
+    }
+    #endregion
+
+    #region Trim recent local events
+    private static void TrimRecentEvents(WatcherState state)
+    {
+        if (state.RecentEvents.Count <= MaxRecentEvents)
+        {
+            return;
+        }
+
+        state.RecentEvents = state.RecentEvents
+            .OrderByDescending(item => item.OccurredAt)
+            .Take(MaxRecentEvents)
+            .OrderBy(item => item.OccurredAt)
+            .ToList();
     }
     #endregion
 
@@ -263,17 +319,6 @@ internal sealed class TransactionWatcher
             throw new InvalidOperationException(
                 "Another watcher instance is already using the configured Watcher.StateFile.",
                 exception);
-        }
-    }
-    #endregion
-
-    #region Validate watcher configuration
-    private void ValidateConfiguration()
-    {
-        if (string.IsNullOrWhiteSpace(_settings.WebhookUrl))
-        {
-            throw new InvalidOperationException(
-                "Watcher.WebhookUrl is required for the watch command. Configure it in appsettings.json or NYKREDIT_WEBHOOK_URL.");
         }
     }
     #endregion

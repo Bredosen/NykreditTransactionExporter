@@ -1,0 +1,167 @@
+<UserControl x:Class="NykreditTransactionExporter.WpfSample.Views.Overview.OverviewView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <Grid Margin="0,0,0,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="SESSION" />
+                        <TextBlock x:Name="SessionMetricTextBlock"
+                                   Margin="0,7,0,3"
+                                   Style="{StaticResource MetricValueStyle}"
+                                   Text="Unknown" />
+                        <TextBlock x:Name="SessionDetailTextBlock"
+                                   Style="{StaticResource MutedTextStyle}"
+                                   Text="No session loaded" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="ACCOUNTS" />
+                        <TextBlock x:Name="AccountCountTextBlock"
+                                   Margin="0,7,0,3"
+                                   Style="{StaticResource MetricValueStyle}"
+                                   Text="0" />
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="Available through the current consent" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="4" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="WATCHER" />
+                        <TextBlock x:Name="WatcherMetricTextBlock"
+                                   Margin="0,7,0,3"
+                                   Style="{StaticResource MetricValueStyle}"
+                                   Text="Stopped" />
+                        <TextBlock x:Name="WatcherDetailTextBlock"
+                                   Style="{StaticResource MutedTextStyle}"
+                                   Text="No poll recorded" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.05*" />
+                    <ColumnDefinition Width="18" />
+                    <ColumnDefinition Width="0.95*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <Border Margin="0,0,0,18" Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Accounts" />
+                            <TextBlock Margin="0,3,0,12"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       Text="Accounts available in the saved Enable Banking session." />
+                            <ItemsControl x:Name="AccountsItemsControl">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" />
+                                                <TextBlock Margin="0,2,0,0"
+                                                           Style="{StaticResource MutedTextStyle}"
+                                                           Text="{Binding Iban}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1"
+                                                       Margin="16,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding Currency}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock x:Name="NoAccountsTextBlock"
+                                       Margin="0,8,0,0"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       Text="Authorize the application to see accounts." />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Recent watcher events" />
+                            <TextBlock Margin="0,3,0,10"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       Text="Locally detected booked transactions, newest first." />
+                            <ListBox x:Name="RecentEventsListBox"
+                                     MaxHeight="230"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding Transaction.Description}" />
+                                                <TextBlock Margin="0,2,0,0"
+                                                           Style="{StaticResource MutedTextStyle}"
+                                                           Text="{Binding Transaction.Account}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                                <TextBlock HorizontalAlignment="Right"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding Transaction.Amount, StringFormat={}{0:N2}}" />
+                                                <TextBlock HorizontalAlignment="Right"
+                                                           Style="{StaticResource MutedTextStyle}"
+                                                           Text="{Binding Transaction.Currency}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <TextBlock x:Name="NoEventsTextBlock"
+                                       Margin="0,8,0,0"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       Text="No booked transactions have been detected yet." />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Activity" />
+                        <TextBlock Grid.Row="1"
+                                   Margin="0,3,0,10"
+                                   Style="{StaticResource MutedTextStyle}"
+                                   Text="Local UI and API operations for this application session." />
+                        <ListBox x:Name="ActivityListBox"
+                                 Grid.Row="2"
+                                 MinHeight="300"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

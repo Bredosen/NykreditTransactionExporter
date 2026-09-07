@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using NykreditTransactionExporter.Configuration;
-using NykreditTransactionExporter.Export;
 
 namespace NykreditTransactionExporter.Application.Watching;
 
@@ -20,6 +19,10 @@ internal sealed class WebhookNotifier
     #endregion
     #endregion
 
+    #region Properties
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(_settings.WebhookUrl);
+    #endregion
+
     #region Create webhook notifier
     public WebhookNotifier(HttpClient httpClient, WatcherSettings settings)
     {
@@ -30,12 +33,14 @@ internal sealed class WebhookNotifier
 
     #region Send booked transaction event
     public async Task SendBookedTransactionAsync(
-        string transactionKey,
-        ExportTransaction transaction,
+        TransactionBookedEvent webhookEvent,
         CancellationToken cancellationToken)
     {
-        string eventId = TransactionIdentity.CreateEventId(transactionKey);
-        var webhookEvent = new TransactionBookedEvent(eventId, DateTimeOffset.UtcNow, transaction);
+        if (!IsConfigured)
+        {
+            throw new InvalidOperationException("A webhook URL is not configured.");
+        }
+
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(webhookEvent, JsonOptions);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, _settings.WebhookUrl);
@@ -45,7 +50,7 @@ internal sealed class WebhookNotifier
             CharSet = "utf-8"
         };
         request.Headers.TryAddWithoutValidation("X-Nykredit-Event", webhookEvent.Type);
-        request.Headers.TryAddWithoutValidation("X-Nykredit-Event-Id", eventId);
+        request.Headers.TryAddWithoutValidation("X-Nykredit-Event-Id", webhookEvent.EventId);
 
         if (!string.IsNullOrWhiteSpace(_settings.WebhookSecret))
         {

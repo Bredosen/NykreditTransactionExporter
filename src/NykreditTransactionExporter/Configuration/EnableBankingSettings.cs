@@ -15,7 +15,7 @@ internal sealed class EnableBankingSettings
 
     public string PsuType { get; set; } = "personal";
 
-    public string RedirectUrl { get; set; } = "http://localhost:53682/callback/";
+    public string RedirectUrl { get; set; } = "https://localhost:53682/callback/";
 
     public int PreferredConsentDays { get; set; } = 180;
     #endregion

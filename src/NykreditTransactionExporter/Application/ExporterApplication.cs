@@ -1,22 +1,16 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Net;
-using System.Text.Json;
+using NykreditTransactionExporter.Application.Operations;
 using NykreditTransactionExporter.Application.Watching;
 using NykreditTransactionExporter.Configuration;
-using NykreditTransactionExporter.EnableBanking;
-using NykreditTransactionExporter.Export;
-using NykreditTransactionExporter.Storage;
 
 namespace NykreditTransactionExporter.Application;
 
 internal sealed class ExporterApplication
 {
-    #region Fields
+    #region Readonly Fields
     private readonly AppSettings _settings;
-    private readonly EnableBankingClient _client;
-    private readonly SessionStore _sessionStore;
-    private readonly CsvExporter _csvExporter;
+    private readonly BankingOperations _operations;
     private readonly CallbackReceiver _callbackReceiver;
     private readonly TransactionWatcher _transactionWatcher;
     #endregion
@@ -24,16 +18,12 @@ internal sealed class ExporterApplication
     #region Create application
     public ExporterApplication(
         AppSettings settings,
-        EnableBankingClient client,
-        SessionStore sessionStore,
-        CsvExporter csvExporter,
+        BankingOperations operations,
         CallbackReceiver callbackReceiver,
         TransactionWatcher transactionWatcher)
     {
         _settings = settings;
-        _client = client;
-        _sessionStore = sessionStore;
-        _csvExporter = csvExporter;
+        _operations = operations;
         _callbackReceiver = callbackReceiver;
         _transactionWatcher = transactionWatcher;
     }
@@ -69,65 +59,41 @@ internal sealed class ExporterApplication
     #region Authorize bank access
     private async Task AuthorizeAsync(CancellationToken cancellationToken)
     {
-        EnableBankingSettings bankSettings = _settings.EnableBanking;
-        BankInfo bank = await _client.GetBankAsync(
-            bankSettings.AspspName,
-            bankSettings.AspspCountry,
-            bankSettings.PsuType,
-            cancellationToken);
+        AuthorizationChallenge challenge = await _operations.StartAuthorizationAsync(cancellationToken);
+        var redirectUri = new Uri(_settings.EnableBanking.RedirectUrl, UriKind.Absolute);
 
-        TimeSpan bankMaximum = TimeSpan.FromSeconds(bank.MaximumConsentValiditySeconds);
-        TimeSpan preferred = TimeSpan.FromDays(bankSettings.PreferredConsentDays);
-        TimeSpan consentDuration = preferred <= bankMaximum ? preferred : bankMaximum;
-        if (consentDuration > TimeSpan.FromMinutes(2))
-        {
-            consentDuration -= TimeSpan.FromMinutes(1);
-        }
-
-        DateTimeOffset validUntil = DateTimeOffset.UtcNow.Add(consentDuration);
-        string state = Guid.NewGuid().ToString("D");
-        AuthorizationStart authorization = await _client.StartAuthorizationAsync(
-            bankSettings,
-            bank,
-            state,
-            validUntil,
-            cancellationToken);
-
-        var redirectUri = new Uri(bankSettings.RedirectUrl, UriKind.Absolute);
         Console.WriteLine("Open this URL to authorize access with Nykredit/MitID:");
-        Console.WriteLine(authorization.Url);
-        TryOpenBrowser(authorization.Url);
+        Console.WriteLine(challenge.Url);
+        TryOpenBrowser(challenge.Url);
 
         string code;
         if (_callbackReceiver.CanListen(redirectUri))
         {
             try
             {
-                code = await _callbackReceiver.ListenAsync(redirectUri, state, cancellationToken);
+                code = await _callbackReceiver.ListenAsync(redirectUri, challenge.State, cancellationToken);
             }
             catch (HttpListenerException exception)
             {
                 Console.WriteLine($"Local callback listener could not start: {exception.Message}");
-                code = _callbackReceiver.ReadFromConsole(state);
+                code = _callbackReceiver.ReadFromConsole(challenge.State);
             }
         }
         else
         {
-            code = _callbackReceiver.ReadFromConsole(state);
+            code = _callbackReceiver.ReadFromConsole(challenge.State);
         }
 
-        SessionState session = await _client.AuthorizeSessionAsync(code, cancellationToken);
-        await _sessionStore.SaveAsync(session, cancellationToken);
-
+        SessionInfo session = await _operations.CompleteAuthorizationAsync(code, cancellationToken);
         Console.WriteLine($"Session saved. Accessible accounts: {session.Accounts.Count}.");
         if (session.ValidUntil.HasValue)
         {
             Console.WriteLine($"Session valid until: {session.ValidUntil.Value:O}");
         }
 
-        foreach (AccountState account in session.Accounts)
+        foreach (AccountInfo account in session.Accounts)
         {
-            Console.WriteLine($"- {AccountDisplayName(account)} [{account.Uid}]");
+            Console.WriteLine($"- {account.DisplayName} [{account.Uid}]");
         }
     }
     #endregion
@@ -135,19 +101,9 @@ internal sealed class ExporterApplication
     #region Show session status
     private async Task ShowStatusAsync(CancellationToken cancellationToken)
     {
-        SessionState session = await _sessionStore.LoadAsync(cancellationToken);
-        using JsonDocument document = await _client.GetSessionAsync(session.SessionId, cancellationToken);
-        JsonElement root = document.RootElement;
-        string status = root.TryGetProperty("status", out JsonElement statusValue)
-            ? statusValue.GetString() ?? "unknown"
-            : "unknown";
-        string validUntil = root.TryGetProperty("access", out JsonElement access) &&
-                            access.TryGetProperty("valid_until", out JsonElement validUntilValue)
-            ? validUntilValue.GetString() ?? "unknown"
-            : "unknown";
-
-        Console.WriteLine($"Status: {status}");
-        Console.WriteLine($"Valid until: {validUntil}");
+        SessionInfo session = await _operations.GetSessionInfoAsync(cancellationToken);
+        Console.WriteLine($"Status: {session.Status}");
+        Console.WriteLine($"Valid until: {session.ValidUntil?.ToString("O") ?? "unknown"}");
         Console.WriteLine($"Saved accounts: {session.Accounts.Count}");
     }
     #endregion
@@ -155,67 +111,18 @@ internal sealed class ExporterApplication
     #region Export monthly transactions
     private async Task ExportAsync(CommandLineOptions options, CancellationToken cancellationToken)
     {
-        MonthRange month = MonthRange.Create(options.Month);
-        SessionState session = await _sessionStore.LoadAsync(cancellationToken);
-        await EnsureAuthorizedSessionAsync(session, cancellationToken);
-
-        IReadOnlyList<AccountState> accounts = SelectAccounts(session, options.AccountUid);
-        var exportRows = new List<ExportTransaction>();
-        foreach (AccountState account in accounts)
-        {
-            IReadOnlyList<JsonElement> transactions = await _client.GetBookedTransactionsAsync(
-                account.Uid,
-                month.Start,
-                month.End,
-                cancellationToken);
-
-            exportRows.AddRange(transactions.Select(transaction => TransactionMapper.Map(account, transaction)));
-            Console.WriteLine($"{AccountDisplayName(account)}: {transactions.Count} booked transactions.");
-        }
-
-        ExportTransaction[] orderedRows = exportRows
-            .OrderBy(row => row.BookingDate ?? row.TransactionDate ?? DateOnly.MinValue)
-            .ThenBy(row => row.EntryReference, StringComparer.Ordinal)
-            .ToArray();
-
-        string outputPath = await _csvExporter.ExportAsync(
-            orderedRows,
-            month,
+        ExportResult result = await _operations.ExportAsync(
+            options.Month,
+            options.AccountUid,
             options.OutputPath,
             cancellationToken);
-        Console.WriteLine($"Exported {orderedRows.Length} transactions to {outputPath}");
-    }
-    #endregion
 
-    #region Ensure session is authorized
-    private async Task EnsureAuthorizedSessionAsync(SessionState session, CancellationToken cancellationToken)
-    {
-        using JsonDocument document = await _client.GetSessionAsync(session.SessionId, cancellationToken);
-        string? status = document.RootElement.TryGetProperty("status", out JsonElement statusValue)
-            ? statusValue.GetString()
-            : null;
-
-        if (!string.Equals(status, "AUTHORIZED", StringComparison.OrdinalIgnoreCase))
+        foreach (AccountExportResult account in result.Accounts)
         {
-            throw new InvalidOperationException(
-                $"The saved Enable Banking session is '{status ?? "unknown"}'. Run authorize again before exporting.");
-        }
-    }
-    #endregion
-
-    #region Select accounts
-    private static IReadOnlyList<AccountState> SelectAccounts(SessionState session, string? requestedUid)
-    {
-        if (string.IsNullOrWhiteSpace(requestedUid))
-        {
-            return session.Accounts;
+            Console.WriteLine($"{account.DisplayName}: {account.TransactionCount} booked transactions.");
         }
 
-        AccountState? account = session.Accounts.FirstOrDefault(candidate =>
-            string.Equals(candidate.Uid, requestedUid, StringComparison.OrdinalIgnoreCase));
-        return account is not null
-            ? new[] { account }
-            : throw new ArgumentException($"Account uid '{requestedUid}' does not exist in the saved session.");
+        Console.WriteLine($"Exported {result.TransactionCount} transactions to {result.OutputPath}");
     }
     #endregion
 
@@ -236,15 +143,6 @@ internal sealed class ExporterApplication
     }
     #endregion
 
-    #region Format account name
-    private static string AccountDisplayName(AccountState account)
-    {
-        return new[] { account.Product, account.Details, account.Iban, account.Name, account.Uid }
-            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
-            ?? account.Uid;
-    }
-    #endregion
-
     #region Show command help
     private static void ShowHelp()
     {
@@ -261,8 +159,11 @@ internal sealed class ExporterApplication
         Console.WriteLine("      Export booked transactions. The previous calendar month is the default.");
         Console.WriteLine();
         Console.WriteLine("  watch [--account uid] [--once]");
-        Console.WriteLine("      Poll for newly booked transactions and POST transaction.booked webhooks.");
+        Console.WriteLine("      Detect newly booked transactions locally and optionally POST transaction.booked webhooks.");
         Console.WriteLine("      --once performs one poll; otherwise the configured interval is used continuously.");
+        Console.WriteLine();
+        Console.WriteLine("  api");
+        Console.WriteLine("      Start the local HTTPS REST API and authorization callback host.");
     }
     #endregion
 }

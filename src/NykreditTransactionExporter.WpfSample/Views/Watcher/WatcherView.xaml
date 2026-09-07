@@ -1,0 +1,89 @@
+<UserControl x:Class="NykreditTransactionExporter.WpfSample.Views.Watcher.WatcherView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="14" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Style="{StaticResource CardStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="280" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock x:Name="WatcherStateTextBlock"
+                               Style="{StaticResource SectionTitleStyle}"
+                               Text="Stopped" />
+                    <TextBlock x:Name="WatcherDetailTextBlock"
+                               Margin="0,4,0,0"
+                               Style="{StaticResource MutedTextStyle}"
+                               Text="No successful poll recorded." />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Style="{StaticResource MutedTextStyle}" Text="ACCOUNT SCOPE" />
+                    <ComboBox x:Name="WatcherAccountComboBox" Margin="0,5,0,0" />
+                </StackPanel>
+                <Button x:Name="StartWatcherButton"
+                        Grid.Column="4"
+                        Margin="0,19,0,0"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="StartWatcherButton_Click"
+                        Content="Start" />
+                <Button x:Name="PollOnceButton"
+                        Grid.Column="5"
+                        Margin="8,19,0,0"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="PollOnceButton_Click"
+                        Content="Poll once" />
+                <Button x:Name="StopWatcherButton"
+                        Grid.Column="6"
+                        Margin="8,19,0,0"
+                        Style="{StaticResource DangerButtonStyle}"
+                        Click="StopWatcherButton_Click"
+                        Content="Stop" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.7*" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="0">
+                <DataGrid x:Name="WatcherEventsDataGrid"
+                          AutoGenerateColumns="False"
+                          SelectionChanged="WatcherEventsDataGrid_SelectionChanged">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Detected" Binding="{Binding OccurredAt, StringFormat={}{0:dd-MM HH:mm}}" Width="110" />
+                        <DataGridTextColumn Header="Description" Binding="{Binding Transaction.Description}" Width="2*" />
+                        <DataGridTextColumn Header="Account" Binding="{Binding Transaction.Account}" Width="1.2*" />
+                        <DataGridTextColumn Header="Amount" Binding="{Binding Transaction.Amount, StringFormat={}{0:N2}}" Width="95" />
+                        <DataGridTextColumn Header="Currency" Binding="{Binding Transaction.Currency}" Width="72" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Event details" />
+                    <TextBlock x:Name="EventDetailTextBlock"
+                               Margin="0,8,0,0"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               Text="Select a detected transaction to inspect it." />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

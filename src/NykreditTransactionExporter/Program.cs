@@ -1,4 +1,6 @@
 using NykreditTransactionExporter.Application;
+using NykreditTransactionExporter.Application.Api;
+using NykreditTransactionExporter.Application.Operations;
 using NykreditTransactionExporter.Application.Watching;
 using NykreditTransactionExporter.Configuration;
 using NykreditTransactionExporter.EnableBanking;
@@ -51,14 +53,24 @@ internal static class Program
                 sessionStore,
                 watcherStateStore,
                 webhookNotifier);
+            var operations = new BankingOperations(settings, client, sessionStore, csvExporter);
+
+            if (IsApiCommand(args))
+            {
+                var watcherCoordinator = new WatcherCoordinator(
+                    transactionWatcher,
+                    watcherStateStore,
+                    cancellation.Token);
+                var apiHost = new ApiHost(settings, operations, watcherCoordinator);
+                await apiHost.RunAsync(cancellation.Token);
+                return 0;
+            }
+
             var application = new ExporterApplication(
                 settings,
-                client,
-                sessionStore,
-                csvExporter,
+                operations,
                 callbackReceiver,
                 transactionWatcher);
-
             return await application.RunAsync(args, cancellation.Token);
         }
         catch (OperationCanceledException)
@@ -71,6 +83,13 @@ internal static class Program
             Console.Error.WriteLine(exception.Message);
             return 1;
         }
+    }
+    #endregion
+
+    #region Check API command
+    private static bool IsApiCommand(string[] args)
+    {
+        return args.Length > 0 && string.Equals(args[0], "api", StringComparison.OrdinalIgnoreCase);
     }
     #endregion
 }

@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="src/NykreditTransactionExporter/NykreditTransactionExporter.csproj" />
+  <Project Path="src/NykreditTransactionExporter.WpfSample/NykreditTransactionExporter.WpfSample.csproj" />
 </Solution>
